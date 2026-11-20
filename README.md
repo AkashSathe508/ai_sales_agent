@@ -92,6 +92,33 @@ python -m app.main "Qualify LEAD-001" --org-id my-org --user-id user-123
 python -m app.main --help
 ```
 
+## Running the Frontend and API
+
+Install backend dependencies from the repository root, then start FastAPI:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m uvicorn fastapi_app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+In another terminal, start the frontend:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite app uses `http://localhost:8000` by default. To change it, set `VITE_API_BASE_URL` in `frontend/.env.local` and restart Vite. The backend CORS allowlist defaults to the localhost Vite origins; set `CORS_ORIGINS` to a comma-separated list when hosting the frontend elsewhere.
+
+You can verify the run endpoint with the checked-in sample payload:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/agent/run -ContentType 'application/json' -InFile data/sample_requests/agent_run.json
+```
+
+The sample targets seeded `LEAD-001` (Meridian Financial Group). Other seeded workflow IDs include `LEAD-002`, `CUSTOMER-001`, and `DEAL-001`. Use `GET /api/v1/leads` and `GET /api/v1/customers` to inspect the CRM seed records. The API returns HTTP 422 for invalid request data and HTTP 503 if an accepted request cannot execute because of workflow errors or missing dependencies; inspect backend logs for the underlying exception.
+
 ---
 
 ## Running Tests

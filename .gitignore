@@ -1,4 +1,9 @@
 .env
+*.env
+frontend/.env
+node_modules/
+frontend/node_modules/
+frontend/dist/
 *.pyc
 __pycache__/
 *.pyo
@@ -14,3 +19,4 @@ env/
 .coverage
 htmlcov/
 *.log
+

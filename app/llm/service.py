@@ -108,6 +108,7 @@ class LLMService:
 
         # Suppress verbose litellm logs unless DEBUG
         litellm.set_verbose = settings.app.debug
+        litellm.drop_params = True
 
     async def generate(
         self,

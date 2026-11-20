@@ -1,10 +1,12 @@
 """RAG package."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from app.rag.embeddings import MockEmbeddingService, create_embedding_service
 from app.rag.ingestion.pipeline import IngestionPipeline
 from app.rag.retrieval.hybrid_search import HybridSearchService
 from app.rag.retrieval.vector_store import InMemoryDocumentStore
 from app.rag.self_rag.evaluator import SelfRAGEvaluator
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.tools.rag.tool import RAGTool
@@ -31,8 +33,8 @@ async def get_initialized_rag_tool(sample_docs_dir: str = "data/sample_documents
 
 __all__ = [
     "get_initialized_rag_tool",
-    "RAGTool",
     "HybridSearchService",
     "SelfRAGEvaluator",
     "InMemoryDocumentStore",
 ]
+

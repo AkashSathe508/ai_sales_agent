@@ -15,9 +15,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class LLMSettings(BaseSettings):
     """LLM / LiteLLM configuration."""
 
-    model: str = Field(default="gemini/gemini-2.5-flash", alias="LITELLM_MODEL")
+    model: str = Field(default="gemini/gemini-3.8-flash", alias="LITELLM_MODEL")
     fallback_model: str = Field(
-        default="gemini/gemini-3.8-flash", alias="LITELLM_FALLBACK_MODEL"
+        default="gemini/gemini-2.0-flash", alias="LITELLM_FALLBACK_MODEL"
     )
     google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")

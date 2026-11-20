@@ -12,6 +12,8 @@ readme = "README.md"
 license = { text = "MIT" }
 
 dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
     # Core AI / Orchestration
     "langgraph>=0.2.0",
     "langchain>=0.3.0",
