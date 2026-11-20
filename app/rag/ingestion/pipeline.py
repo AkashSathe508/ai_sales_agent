@@ -27,10 +27,14 @@ class IngestionPipeline:
         store: DocumentStoreProtocol | None = None,
         embedding_service: EmbeddingServiceProtocol | None = None,
         chunker: MarkdownSectionChunker | None = None,
+        organization_id: str = "org_demo",
     ) -> None:
         self._store = store or InMemoryDocumentStore()
+        self.organization_id = organization_id
         self._embeddings = embedding_service or create_embedding_service()
-        self._chunker = chunker or MarkdownSectionChunker()
+        from app.config.settings import get_settings
+        cfg = get_settings().rag
+        self._chunker = chunker or MarkdownSectionChunker(cfg.chunk_size, cfg.chunk_overlap)
 
     async def ingest_document(
         self,
@@ -45,7 +49,7 @@ class IngestionPipeline:
                 source=doc.source,
                 title=doc.title,
                 text=doc.content,
-                base_metadata=doc.metadata,
+                base_metadata={"doc_type": doc.doc_type, **doc.metadata},
             )
 
             if not chunks:
@@ -59,10 +63,16 @@ class IngestionPipeline:
             # Generate embeddings in batch
             texts = [c.content for c in chunks]
             embeddings = await self._embeddings.embed_documents(texts)
+            if len(embeddings) != len(chunks):
+                raise ValueError("Embedding service returned a mismatched batch size")
             for chunk, emb in zip(chunks, embeddings):
+                if len(emb) != self._embeddings.dimension:
+                    raise ValueError(f"Embedding dimension {len(emb)} does not match service dimension {self._embeddings.dimension}")
                 chunk.embedding = emb
 
             # Store chunks
+            if hasattr(self._store, "organization_id"):
+                self._store.organization_id = self.organization_id
             await self._store.add_chunks(chunks)
             logger.info(
                 "Document ingested successfully",

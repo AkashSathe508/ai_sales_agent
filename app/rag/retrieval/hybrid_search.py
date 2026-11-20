@@ -13,7 +13,7 @@ from app.observability.logging import get_logger
 from app.rag.embeddings import EmbeddingServiceProtocol, create_embedding_service
 from app.rag.retrieval.reranker import Reranker, SimpleReranker
 from app.rag.retrieval.rrf import fuse_results
-from app.rag.retrieval.vector_store import DocumentStoreProtocol, InMemoryDocumentStore
+from app.rag.retrieval.vector_store import DocumentStoreProtocol, InMemoryDocumentStore, PostgreSQLDocumentStore
 from app.rag.schemas import RetrievedChunk
 
 logger = get_logger(__name__)
@@ -31,7 +31,16 @@ class HybridSearchService:
         embedding_service: EmbeddingServiceProtocol | None = None,
         reranker: Reranker | None = None,
     ) -> None:
-        self._store = store or InMemoryDocumentStore()
+        if store is not None:
+            self._store = store
+        else:
+            settings = __import__("app.config.settings", fromlist=["get_settings"]).get_settings()
+            if settings.rag.storage_backend == "memory":
+                if settings.is_production:
+                    raise RuntimeError("In-memory RAG storage is not allowed in production")
+                self._store = InMemoryDocumentStore()
+            else:
+                self._store = PostgreSQLDocumentStore()
         self._embeddings = embedding_service or create_embedding_service()
         self._reranker = reranker or SimpleReranker()
 
@@ -42,6 +51,7 @@ class HybridSearchService:
         semantic_limit: int = 15,
         keyword_limit: int = 15,
         rrf_k: int = 60,
+        organization_id: str | None = None,
     ) -> list[RetrievedChunk]:
         """
         Perform hybrid search with RRF and reranking.
@@ -57,6 +67,8 @@ class HybridSearchService:
             Ranked list of RetrievedChunk
         """
         start = time.time()
+        if organization_id and isinstance(self._store, PostgreSQLDocumentStore):
+            self._store.organization_id = organization_id
         logger.debug("Executing hybrid search", query=query[:80])
 
         # 1. Embed query

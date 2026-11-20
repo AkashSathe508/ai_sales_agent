@@ -82,7 +82,10 @@ class RAGTool:
                 evaluation = await self._evaluator.evaluate(query=query, chunks=chunks)
 
             # 3. Convert accepted chunks to Evidence schemas
-            evidence_list: list[Evidence] = [c.to_evidence() for c in chunks]
+            evidence_list: list[Evidence] = [
+                c.to_evidence() for c in chunks
+                if evaluation is None or evaluation.sufficient
+            ]
 
             latency_ms = (time.time() - start) * 1000
             tool_calls_total.labels(tool_name=TOOL_NAME, agent="rag", status="success").inc()

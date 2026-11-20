@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 from app.config.settings import get_settings
 from app.exceptions import EmbeddingError
 from app.observability.logging import get_logger
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = get_logger(__name__)
 
@@ -27,6 +28,7 @@ class EmbeddingServiceProtocol(Protocol):
         """Generate embedding vector for a search query."""
         ...
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=True)
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Generate embedding vectors for a batch of document texts."""
         ...
@@ -101,7 +103,9 @@ class LiteLLMEmbeddingService:
         dimension: int = 768,
     ) -> None:
         settings = get_settings()
-        self._model = model or settings.llm.model.replace("gemini", "text-embedding-004") if "gemini" in settings.llm.model else "text-embedding-3-small"
+        configured = settings.rag.embedding_model
+        model_name = configured.removeprefix("models/")
+        self._model = model or (configured if "/" in configured else f"gemini/{model_name}")
         self._dimension = dimension
         self._api_key = settings.llm.google_api_key
 
@@ -122,17 +126,28 @@ class LiteLLMEmbeddingService:
                 input=texts,
                 api_key=self._api_key,
             )
-            return [data["embedding"] for data in response.data]
+            vectors = [list(data["embedding"]) for data in response.data]
+            for vector in vectors:
+                if len(vector) != self._dimension:
+                    raise EmbeddingError(f"Embedding provider returned dimension {len(vector)}; configured dimension is {self._dimension}")
+            if len(vectors) != len(texts):
+                raise EmbeddingError("Embedding provider returned a different number of vectors than inputs")
+            return vectors
         except Exception as exc:
             logger.error("Embedding generation failed via LiteLLM", error=str(exc))
             raise EmbeddingError(f"Embedding generation failed: {exc}") from exc
 
 
-def create_embedding_service(use_mock: bool = True) -> EmbeddingServiceProtocol:
+def create_embedding_service(use_mock: bool | None = None) -> EmbeddingServiceProtocol:
     """Factory to create the configured embedding service."""
+    settings = get_settings()
+    if use_mock is None:
+        use_mock = not bool(settings.llm.google_api_key and settings.llm.google_api_key not in {"your_google_api_key_here", "test_key"})
     if use_mock:
-        return MockEmbeddingService()
+        return MockEmbeddingService(dimension=settings.rag.embedding_dimensions)
     try:
-        return LiteLLMEmbeddingService()
-    except Exception:
-        return MockEmbeddingService()
+        return LiteLLMEmbeddingService(dimension=settings.rag.embedding_dimensions)
+    except Exception as exc:
+        if settings.is_production:
+            raise EmbeddingError(f"Could not configure production embedding service: {exc}") from exc
+        return MockEmbeddingService(dimension=settings.rag.embedding_dimensions)

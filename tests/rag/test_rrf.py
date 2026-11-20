@@ -39,6 +39,8 @@ def test_rrf_combines_and_ranks_documents():
     assert fused[0].retrieval_method == RetrievalMethod.HYBRID
     # doc_A RRF score should be 1/(60+1) + 1/(60+1) = 2/61 ≈ 0.03278
     assert fused[0].score == pytest.approx(2 / 61, rel=1e-3)
+    assert fused[0].metadata["retrieval_ranks"] == {"semantic": 1, "keyword": 1}
+    assert fused[0].metadata["retrieval_sources"] == ["keyword", "semantic"]
 
     # doc_B and doc_C each appeared at rank 2: 1/(60+2) = 1/62 ≈ 0.0161
     assert fused[1].score == pytest.approx(1 / 62, rel=1e-3)

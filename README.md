@@ -20,7 +20,7 @@ This system accepts a natural language query and autonomously routes it through 
 
 - **Python** >= 3.12
 - **Google API Key** (for Gemini LLM + text-embedding-004) — optional; system runs fully offline with deterministic fallbacks
-- No external database required — uses `InMemoryDocumentStore` for RAG
+- PostgreSQL with pgvector for persistent RAG retrieval (`RAG_STORAGE_BACKEND=memory` is available for offline development only)
 
 ---
 
@@ -58,7 +58,7 @@ LITELLM_FALLBACK_MODEL=gemini/gemini-1.5-flash
 ```
 
 **Offline / demo mode** (no API key needed):  
-Leave `GOOGLE_API_KEY` unset or as `your_google_api_key_here`. The system uses deterministic offline fallbacks for all agents — all tests pass and all workflows complete without external API calls.
+Leave `GOOGLE_API_KEY` unset or as `your_google_api_key_here` and set `RAG_STORAGE_BACKEND=memory`. The system uses deterministic mock embeddings and offline LLM fallbacks. Mock vectors are for development and tests, not production relevance.
 
 **Other notable settings**:
 
@@ -123,21 +123,13 @@ The sample targets seeded `LEAD-001` (Meridian Financial Group). Other seeded wo
 
 ## Running Tests
 
-All 29 tests pass without any external API key or database:
+Run the offline unit and agent suite with:
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-**Test coverage summary:**
-
-| Module | Tests |
-|--------|-------|
-| `tests/agents/` | 6 — Supervisor, Qualification, Intelligence, Proposal agents |
-| `tests/guardrails/` | 6 — Input validation, injection defense, evidence, output guardrails |
-| `tests/integration/` | 2 — End-to-end qualification and proposal workflows |
-| `tests/rag/` | 5 — RAG ingestion, hybrid search, RRF, reranker, self-RAG |
-| `tests/tools/` | 10 — Pricing, ROI, Presentation/MCP tools |
+PostgreSQL integration tests require a dedicated test database. See [docs/database_setup.md](docs/database_setup.md); do not run destructive fixtures against a developer database.
 
 ---
 
@@ -153,6 +145,8 @@ User Query
     → Output Guardrails (assemble structured response)
     → Structured AgentState result
 ```
+
+Persistent RAG setup, migration, safe sample seeding, verification, and limitations are documented in [docs/database_setup.md](docs/database_setup.md) and [docs/rag_architecture.md](docs/rag_architecture.md).
 
 ### Agents
 
@@ -176,15 +170,13 @@ User Query
 ### RAG Pipeline
 
 ```
-Documents (Markdown, .txt) → Loader → Chunker (512-token, 64-token overlap)
-    → MockEmbeddingService (offline) / Google text-embedding-004 (live)
-    → InMemoryDocumentStore
-    → Parallel: Semantic Search (cosine) + Keyword Search (BM25-like TF)
-    → Reciprocal Rank Fusion (RRF, k=60)
-    → SimpleReranker (term coverage + phrase bonus)
-    → SelfRAGEvaluator (ACCEPT / RETRIEVE_MORE / INSUFFICIENT_EVIDENCE)
-    → Evidence list with traceable evidence_id per chunk
+Documents → Loader → Existing Chunker → Embedding Service
+    → PostgreSQL (pgvector + JSONB + TSVECTOR)
+    → Semantic Search + PostgreSQL FTS → RRF (k=60)
+    → SimpleReranker → Self-RAG → Existing RAG Tool → Evidence
 ```
+
+`InMemoryDocumentStore` and deterministic embeddings are for offline development and tests. Production requires PostgreSQL; see the database and RAG guides linked above.
 
 ---
 
@@ -207,8 +199,8 @@ sales-ai-agents/
 │   ├── guardrails/              # Input, output, injection, evidence, tool guardrails
 │   ├── observability/           # structlog, Prometheus metrics, correlation IDs
 │   └── config/settings.py       # Pydantic Settings (all config from env vars)
-├── tests/                       # 29 tests (agents, guardrails, integration, RAG, tools)
-├── data/sample_documents/       # Markdown documents loaded into RAG at startup
+├── tests/                       # Unit, agent, RAG, tool, and integration tests
+├── data/sample_documents/       # Synthetic sample documents for safe RAG seeding
 ├── pyproject.toml               # Project metadata and dependencies
 └── .env.example                 # Environment variable template
 ```
@@ -257,7 +249,11 @@ sales-ai-agents/
 | `APPROVAL_REQUIRED` | `true` | Human approval gate for proposals |
 | `MCP_TIMEOUT_SECONDS` | `30` | MCP gateway call timeout |
 | `MCP_USE_MOCK` | `true` | Use mock presentation adapter |
-| `RAG_CHUNK_SIZE` | `512` | Token chunk size for RAG ingestion |
+| `POSTGRES_HOST` / `POSTGRES_PORT` | `localhost` / `5432` | PostgreSQL connection settings |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `sales_ai` / `postgres` / — | PostgreSQL database credentials |
+| `DATABASE_URL` | empty | Optional SQLAlchemy URL override |
+| `RAG_STORAGE_BACKEND` | `postgres` in `.env.example` | `postgres` or offline development `memory` |
+| `RAG_CHUNK_SIZE` | `512` | Character chunk size for RAG ingestion |
 | `RAG_CHUNK_OVERLAP` | `64` | Token overlap between adjacent chunks |
 | `RAG_TOP_K` | `10` | Retrieval candidates per method |
 | `RAG_RERANK_TOP_K` | `5` | Final chunks after reranking |
@@ -287,8 +283,8 @@ sales-ai-agents/
 | LangGraph workflow (all 8 nodes) | ✅ Working |
 | Approval Checkpoint | ✅ Working |
 | Output Guardrails | ✅ Working |
-| Tests (29/29) | ✅ All passing |
-| PostgreSQL + pgvector | 🔲 Planned |
+| PostgreSQL + pgvector repository and migrations | ✅ Implemented; live DB verification required |
+| PostgreSQL integration tests | ⚠️ Not run without an isolated PostgreSQL test database |
 | FastAPI REST backend | 🔲 Planned |
 | Alembic migrations | 🔲 Planned |
 
@@ -297,8 +293,6 @@ sales-ai-agents/
 ## Planned Extensions
 
 - **FastAPI REST API**: Wrap `run_agent_workflow()` as `POST /api/v1/agent/run`
-- **PostgreSQL + pgvector**: Replace `InMemoryDocumentStore` with persistent vector store
-- **Alembic migrations**: Auto-generate and apply schema migrations
 - **Web UI**: React dashboard for proposal review and approval workflow
 - **Real CRM integration**: Bidirectional Salesforce/HubSpot sync
 

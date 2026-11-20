@@ -9,6 +9,7 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, field_validator
+from sqlalchemy.engine import URL, make_url
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,19 +34,29 @@ class LLMSettings(BaseSettings):
 class DatabaseSettings(BaseSettings):
     """PostgreSQL / SQLAlchemy configuration."""
 
-    url: str = Field(
-        default="postgresql+asyncpg://postgres:password@localhost:5432/sales_ai",
-        alias="DATABASE_URL",
-    )
-    url_sync: str = Field(
-        default="postgresql+psycopg2://postgres:password@localhost:5432/sales_ai",
-        alias="DATABASE_URL_SYNC",
-    )
+    host: str = Field(default="localhost", alias="POSTGRES_HOST")
+    port: int = Field(default=5432, alias="POSTGRES_PORT")
+    name: str = Field(default="sales_ai", alias="POSTGRES_DB")
+    user: str = Field(default="postgres", alias="POSTGRES_USER")
+    password: str = Field(default="replace_me", alias="POSTGRES_PASSWORD", repr=False)
+    url: str = Field(default="", alias="DATABASE_URL")
     pool_size: int = Field(default=10, alias="DATABASE_POOL_SIZE")
     max_overflow: int = Field(default=20, alias="DATABASE_MAX_OVERFLOW")
     echo: bool = Field(default=False, alias="DATABASE_ECHO")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def sqlalchemy_url(self) -> URL:
+        """Build a safely escaped psycopg 3 async URL, unless DATABASE_URL overrides it."""
+        raw = self.url.strip()
+        if raw:
+            parsed = make_url(raw)
+            if parsed.drivername in {"postgres", "postgresql", "postgresql+asyncpg", "postgresql+psycopg2"}:
+                parsed = parsed.set(drivername="postgresql+psycopg")
+            return parsed
+        return URL.create("postgresql+psycopg", username=self.user, password=self.password,
+                          host=self.host, port=self.port, database=self.name)
 
 
 class RAGSettings(BaseSettings):
@@ -60,6 +71,7 @@ class RAGSettings(BaseSettings):
         default="models/text-embedding-004", alias="EMBEDDING_MODEL"
     )
     embedding_dimensions: int = Field(default=768, alias="EMBEDDING_DIMENSIONS")
+    storage_backend: Literal["postgres", "memory"] = Field(default="memory", alias="RAG_STORAGE_BACKEND")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

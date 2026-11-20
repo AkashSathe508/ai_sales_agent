@@ -24,6 +24,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
@@ -35,6 +36,13 @@ try:
 except ImportError:
     Vector = None
     VECTOR_AVAILABLE = False
+
+
+if VECTOR_AVAILABLE:
+    from app.config.settings import get_settings as _get_settings
+    _RAG_VECTOR_TYPE = Vector(_get_settings().rag.embedding_dimensions)
+else:
+    _RAG_VECTOR_TYPE = JSON
 
 
 def _uuid() -> str:
@@ -258,6 +266,46 @@ class DocumentChunk(Base):
 
     __table_args__ = (
         Index("ix_doc_chunks_org_doc", "organization_id", "document_id"),
+    )
+
+
+class RagDocument(Base):
+    """Persistent, source-idempotent document record for the RAG corpus."""
+    __tablename__ = "rag_documents"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    source: Mapped[str] = mapped_column(String(1024), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False, default="text/markdown")
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    meta_data: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    chunks: Mapped[list["RagDocumentChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan", passive_deletes=True)
+
+    __table_args__ = (Index("uq_rag_document_org_source", "organization_id", "source", unique=True),)
+
+
+class RagDocumentChunk(Base):
+    """Tenant-scoped chunk with pgvector embedding and PostgreSQL FTS vector."""
+    __tablename__ = "rag_document_chunks"
+
+    id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(128), ForeignKey("rag_documents.id", ondelete="CASCADE"), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Any] = mapped_column(_RAG_VECTOR_TYPE, nullable=False)
+    search_vector: Mapped[Any] = mapped_column(TSVECTOR, nullable=False)
+    meta_data: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    document: Mapped[RagDocument] = relationship(back_populates="chunks")
+
+    __table_args__ = (
+        Index("uq_rag_chunk_document_index", "document_id", "chunk_index", unique=True),
+        Index("ix_rag_chunk_org_doc", "organization_id", "document_id"),
+        Index("ix_rag_chunk_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 

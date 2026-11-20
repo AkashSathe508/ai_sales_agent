@@ -26,6 +26,11 @@ _organization_id_var: ContextVar[str] = ContextVar("organization_id", default=""
 _user_id_var: ContextVar[str] = ContextVar("user_id", default="")
 
 
+def current_organization_id(default: str = "org_demo") -> str:
+    """Return tenant ID bound by the active agent workflow."""
+    return _organization_id_var.get() or default
+
+
 def set_log_context(
     request_id: str = "",
     agent_run_id: str = "",

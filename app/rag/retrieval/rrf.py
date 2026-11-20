@@ -48,11 +48,13 @@ def fuse_results(
     # Map chunk_id → accumulated RRF score and best chunk object
     scores: dict[str, float] = defaultdict(float)
     chunks: dict[str, RetrievedChunk] = {}
+    ranks: dict[str, dict[str, int]] = defaultdict(dict)
 
     # Process semantic results
     for rank_idx, chunk in enumerate(semantic_results):
         rrf_contribution = semantic_weight / (k + rank_idx + 1)
         scores[chunk.chunk_id] += rrf_contribution
+        ranks[chunk.chunk_id]["semantic"] = rank_idx + 1
         if chunk.chunk_id not in chunks:
             chunks[chunk.chunk_id] = chunk
 
@@ -60,6 +62,7 @@ def fuse_results(
     for rank_idx, chunk in enumerate(keyword_results):
         rrf_contribution = keyword_weight / (k + rank_idx + 1)
         scores[chunk.chunk_id] += rrf_contribution
+        ranks[chunk.chunk_id]["keyword"] = rank_idx + 1
         if chunk.chunk_id not in chunks:
             chunks[chunk.chunk_id] = chunk
 
@@ -85,6 +88,8 @@ def fuse_results(
                 **chunk.metadata,
                 "rrf_score": scores[chunk_id],
                 "original_method": chunk.retrieval_method,
+                "retrieval_ranks": ranks[chunk_id],
+                "retrieval_sources": sorted(ranks[chunk_id]),
             },
         )
         fused.append(fused_chunk)

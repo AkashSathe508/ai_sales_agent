@@ -185,3 +185,9 @@ ai_sales_agent/
 │   └── vite.config.js
 └── PROJECT_CONTEXT.md
 ```
+
+## PostgreSQL + pgvector RAG phase
+
+RAG persistence is implemented as an additive PostgreSQL repository using `rag_documents` and `rag_document_chunks`, Psycopg 3, SQLAlchemy 2.x, JSONB, pgvector cosine search, and PostgreSQL `simple` FTS with a trigger-maintained TSVECTOR and GIN index. The existing RAG tool remains the agent boundary. Hybrid search uses tenant-filtered semantic and FTS retrieval, RRF (`k=60`), `SimpleReranker`, then Self-RAG. Source identifiers and chunk IDs are retained.
+
+Use [docs/database_setup.md](docs/database_setup.md) for PostgreSQL/pgvector installation, environment setup, Alembic migration, safe synthetic seeding, verification, and agent commands. See [docs/rag_architecture.md](docs/rag_architecture.md) for retrieval details and limitations. The in-memory store and mock embeddings remain for isolated development/tests; production rejects memory storage. The simple reranker and deterministic mock embedding/evidence paths are development approximations, not guarantees of relevance or factual correctness. PostgreSQL integration and live Google embedding behavior require external services and must be reported as unverified when they are unavailable.

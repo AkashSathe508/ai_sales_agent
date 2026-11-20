@@ -8,8 +8,11 @@ hallucinations.
 from __future__ import annotations
 
 import time
+import re
 
-from app.llm.service import LLMService, create_llm_service
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.llm.service import LLMService
 from app.observability.logging import get_logger
 from app.rag.schemas import RetrievedChunk
 from app.rag.self_rag.prompts import SELF_RAG_SYSTEM_PROMPT, SELF_RAG_USER_TEMPLATE
@@ -25,7 +28,7 @@ class SelfRAGEvaluator:
     """
 
     def __init__(self, llm_service: LLMService | None = None) -> None:
-        self._llm = llm_service or create_llm_service(agent_name="self_rag")
+        self._llm = llm_service
 
     async def evaluate(
         self,
@@ -66,17 +69,24 @@ class SelfRAGEvaluator:
         from app.config.settings import get_settings
         settings = get_settings()
         if not settings.llm.google_api_key or settings.llm.google_api_key in {"your_google_api_key_here", "test_key", ""}:
-            # Fast deterministic evaluation without network delay
+            # Conservative offline relevance check; evidence presence alone is not sufficiency.
             evidence_ids = [c.chunk_id for c in chunks]
-            is_sufficient = len(chunks) >= 1
+            terms = {t for t in re.findall(r"[\w-]+", query.lower()) if len(t) > 2}
+            evidence = " ".join(f"{c.title} {c.section or ''} {c.content}" for c in chunks).lower()
+            matched = {term for term in terms if term in evidence}
+            relevant = bool(matched) or not terms
+            is_sufficient = relevant and len(matched) >= max(1, min(2, len(terms)))
+            action = EvidenceAction.ACCEPT if is_sufficient else (
+                EvidenceAction.RETRIEVE_MORE if relevant else EvidenceAction.INSUFFICIENT_EVIDENCE
+            )
             return EvidenceEvaluation(
-                relevant=len(chunks) > 0,
+                relevant=relevant,
                 sufficient=is_sufficient,
-                missing_information=[] if is_sufficient else ["Partial evidence found"],
-                unsupported_claims=[],
-                recommended_action=EvidenceAction.ACCEPT if is_sufficient else EvidenceAction.INSUFFICIENT_EVIDENCE,
-                evidence_ids=evidence_ids,
-                reasoning="Deterministic evidence evaluation applied.",
+                missing_information=[] if is_sufficient else ["Evidence does not cover enough of the query terms."],
+                unsupported_claims=[] if is_sufficient else ["Claims beyond the retrieved evidence are unsupported."],
+                recommended_action=action,
+                evidence_ids=evidence_ids if relevant else [],
+                reasoning="Conservative deterministic relevance and term coverage check applied; this is not a factuality guarantee.",
             )
 
         messages = [
@@ -90,6 +100,9 @@ class SelfRAGEvaluator:
         ]
 
         try:
+            if self._llm is None:
+                from app.llm.service import create_llm_service
+                self._llm = create_llm_service(agent_name="self_rag")
             eval_result = await self._llm.structured_generate(
                 messages=messages,
                 output_schema=EvidenceEvaluation,
@@ -118,16 +131,18 @@ class SelfRAGEvaluator:
                 error=str(exc),
             )
             evidence_ids = [c.chunk_id for c in chunks]
-            is_sufficient = len(chunks) >= 1
+            terms = {t for t in re.findall(r"[\w-]+", query.lower()) if len(t) > 2}
+            evidence = " ".join(f"{c.title} {c.section or ''} {c.content}" for c in chunks).lower()
+            relevant = any(term in evidence for term in terms) if terms else bool(chunks)
+            is_sufficient = relevant and sum(term in evidence for term in terms) >= max(1, min(2, len(terms)))
             return EvidenceEvaluation(
-                relevant=len(chunks) > 0,
+                relevant=relevant,
                 sufficient=is_sufficient,
                 missing_information=[] if is_sufficient else ["Partial evidence found"],
                 unsupported_claims=[],
                 recommended_action=(
                     EvidenceAction.ACCEPT
-                    if is_sufficient
-                    else EvidenceAction.RETRIEVE_MORE
+                    if is_sufficient else (EvidenceAction.RETRIEVE_MORE if relevant else EvidenceAction.INSUFFICIENT_EVIDENCE)
                 ),
                 evidence_ids=evidence_ids,
                 reasoning="Heuristic fallback validation applied.",
